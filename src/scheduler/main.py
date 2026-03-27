@@ -24,7 +24,7 @@ from src.backtest.engine import run_backtest
 from src.backtest.report import print_backtest_report
 from src.report.sender import send_daily_report
 from src.rules.parser import load_rules
-from src.scanner.scanner import run_scan
+from src.scanner.scanner import run_scan, run_scan_on_tickers
 
 logger = logging.getLogger(__name__)
 
@@ -53,20 +53,33 @@ def _load_settings(settings_path: str) -> dict[str, Any]:
     return result
 
 
-def _run_now(dry_run: bool = False) -> None:
+def _run_now(dry_run: bool = False, tickers: list[str] | None = None) -> None:
     """Run the full daily scan pipeline once.
 
-    Calls run_scan and, when not in dry-run mode, sends the daily email report.
+    When tickers are provided, scans only those symbols (bypasses universe
+    builder). Otherwise runs the full universe scan.
 
     Args:
         dry_run: When True, print signals to stdout and skip email delivery.
+        tickers: Optional explicit list of ticker symbols to scan.
     """
-    logger.info("Running scan — dry_run=%s", dry_run)
-    signals = run_scan(
-        config_path=_config_path,
-        settings_path=_settings_path,
-        dry_run=dry_run,
-    )
+    logger.info("Running scan — dry_run=%s, tickers=%s", dry_run, tickers or "universe")
+    if tickers:
+        rules = load_rules(_config_path)
+        settings = _load_settings(_settings_path)
+        signals = run_scan_on_tickers(tickers, rules, settings)
+        if dry_run:
+            for signal in signals:
+                print(
+                    f"{signal.ticker:6s} | {signal.action:4s} | "
+                    f"{signal.rule_name:30s} | {signal.reason}"
+                )
+    else:
+        signals = run_scan(
+            config_path=_config_path,
+            settings_path=_settings_path,
+            dry_run=dry_run,
+        )
     logger.info("Scan produced %d signal(s)", len(signals))
 
     if not dry_run:
@@ -182,7 +195,7 @@ def main() -> None:
         "--tickers",
         nargs="+",
         metavar="TICKER",
-        help="One or more ticker symbols (required with --backtest)",
+        help="One or more ticker symbols (required with --backtest; optional with --run-now to skip universe builder)",
     )
     parser.add_argument(
         "--start-date",
@@ -227,7 +240,7 @@ def main() -> None:
     _settings_path = args.settings
 
     if args.run_now:
-        _run_now(dry_run=args.dry_run)
+        _run_now(dry_run=args.dry_run, tickers=args.tickers)
 
     elif args.backtest:
         if not args.tickers:
