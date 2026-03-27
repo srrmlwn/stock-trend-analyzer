@@ -6,6 +6,7 @@ pandas-ta (when available) or a built-in fallback implementation.
 
 from __future__ import annotations
 
+import importlib.util
 import logging
 from typing import Any
 
@@ -17,16 +18,18 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Try to import pandas_ta; fall back to manual implementations
 # ---------------------------------------------------------------------------
-try:
-    import pandas_ta as _pta  # type: ignore[import]
+if importlib.util.find_spec("pandas_ta") is not None:
+    try:
+        import pandas_ta  # noqa: F401  # type: ignore[import-untyped]
 
-    _HAS_PANDAS_TA = True
-    logger.debug("pandas_ta loaded successfully.")
-except ImportError:  # pragma: no cover – covered by environment without pandas_ta
+        _HAS_PANDAS_TA = True
+        logger.debug("pandas_ta loaded successfully.")
+    except Exception:  # pragma: no cover
+        _HAS_PANDAS_TA = False
+        logger.warning("pandas_ta found but failed to import. Using built-in implementations.")
+else:
     _HAS_PANDAS_TA = False
-    logger.warning(
-        "pandas_ta is not installed. Using built-in indicator implementations."
-    )
+    logger.warning("pandas_ta is not installed. Using built-in indicator implementations.")
 
 
 # ---------------------------------------------------------------------------
@@ -301,7 +304,7 @@ def add_all_indicators(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame
 
             if indicator == "RSI":
                 period: int = int(req.get("period", 14))
-                key = ("RSI", str(period))
+                key: tuple[str, ...] = ("RSI", str(period))
                 if key not in seen:
                     seen.add(key)
                     add_rsi(df, period=period)

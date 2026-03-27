@@ -294,3 +294,90 @@ def test_add_all_indicators_multiple_indicators(sample_ohlcv: pd.DataFrame) -> N
     assert "MACD_12_26_9" in result.columns
     assert "MACDh_12_26_9" in result.columns
     assert "MACDs_12_26_9" in result.columns
+
+
+def test_add_all_indicators_ema(sample_ohlcv: pd.DataFrame) -> None:
+    """Config with EMA produces EMA column via add_all_indicators."""
+    df = sample_ohlcv.copy()
+    config = {
+        "rules": [
+            {
+                "name": "ema_rule",
+                "conditions": {
+                    "operator": "AND",
+                    "items": [
+                        {"indicator": "EMA", "period": 20, "operator": "gt", "value": 100}
+                    ],
+                },
+            }
+        ]
+    }
+    result = add_all_indicators(df, config)
+    assert "EMA_20" in result.columns
+
+
+def test_add_all_indicators_volume_ratio(sample_ohlcv: pd.DataFrame) -> None:
+    """Config with VOLUME_RATIO produces volume_ratio column via add_all_indicators."""
+    df = sample_ohlcv.copy()
+    config = {
+        "rules": [
+            {
+                "name": "vol_rule",
+                "conditions": {
+                    "operator": "AND",
+                    "items": [
+                        {"indicator": "VOLUME_RATIO", "period": 20, "operator": "gt", "value": 1.5}
+                    ],
+                },
+            }
+        ]
+    }
+    result = add_all_indicators(df, config)
+    assert "volume_ratio_20" in result.columns
+
+
+def test_add_all_indicators_price_change_pct(sample_ohlcv: pd.DataFrame) -> None:
+    """Config with PRICE_CHANGE_PCT produces price_change_pct column via add_all_indicators."""
+    df = sample_ohlcv.copy()
+    config = {
+        "rules": [
+            {
+                "name": "pcp_rule",
+                "conditions": {
+                    "operator": "AND",
+                    "items": [
+                        {
+                            "indicator": "PRICE_CHANGE_PCT",
+                            "period": 5,
+                            "operator": "gt",
+                            "value": 2,
+                        }
+                    ],
+                },
+            }
+        ]
+    }
+    result = add_all_indicators(df, config)
+    assert "price_change_pct_5" in result.columns
+
+
+def test_add_all_indicators_unknown_indicator(sample_ohlcv: pd.DataFrame) -> None:
+    """Unknown indicator in config logs a warning and does not raise."""
+    df = sample_ohlcv.copy()
+    config = {
+        "rules": [
+            {
+                "name": "unknown_rule",
+                "conditions": {
+                    "operator": "AND",
+                    "items": [
+                        {"indicator": "BOLLINGER", "period": 20, "operator": "gt", "value": 0}
+                    ],
+                },
+            }
+        ]
+    }
+    original_cols = set(df.columns)
+    result = add_all_indicators(df, config)
+    # No new columns should be added for an unknown indicator
+    assert set(result.columns) == original_cols
