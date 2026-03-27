@@ -1,0 +1,28 @@
+# Data fetching
+yfinance==0.2.55
+pandas==2.2.3
+numpy==2.1.3
+
+# Technical indicators
+pandas-ta==0.3.14b0
+
+# Backtesting
+vectorbt==0.26.2
+
+# HTTP / networking
+requests==2.32.3
+
+# Config & utilities
+PyYAML==6.0.2
+python-dotenv==1.0.1
+
+# Alpha Vantage supplemental data
+alpha-vantage==3.0.0
+
+# Dev tooling
+black==24.10.0
+ruff==0.8.4
+mypy==1.13.0
+pytest==8.3.4
+pytest-cov==6.0.0
+pytest-mock==3.14.0

@@ -1,0 +1,30 @@
+# Universe pre-filter settings
+universe:
+  min_market_cap_B: 1.0       # Minimum market cap in billions
+  min_avg_volume: 500000       # Minimum average daily volume
+  min_price: 10.0              # Minimum share price
+  cache_ttl_hours: 168         # Refresh universe weekly (7 days)
+
+# Data fetch settings
+data:
+  period_years: 10             # Years of OHLCV history to fetch
+  interval: "1d"               # Daily bars
+  cache_ttl_hours: 24          # Refresh price data daily
+  retry_attempts: 3
+  retry_backoff_seconds: 2
+
+# Scanner settings
+scanner:
+  run_time_et: "10:00"         # Run scan at 10:00 AM ET on weekdays
+
+# Backtesting defaults
+backtest:
+  start_date: "2015-01-01"
+  position_size_usd: 2000.0
+  initial_capital: 50000.0
+
+# Email report settings (credentials come from .env)
+email:
+  subject_template: "Stock Signals — {date} ({count} signals)"
+  smtp_host: "smtp.gmail.com"
+  smtp_port: 587

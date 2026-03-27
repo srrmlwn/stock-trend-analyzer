@@ -1,0 +1,86 @@
+# Buy/sell rule definitions
+# Each rule must have: name, type (buy|sell), conditions block
+# Conditions support AND/OR operator with nested items
+# Optional fundamentals block applies a pre-screen before technical conditions
+
+rules:
+  - name: rsi_oversold_with_volume
+    type: buy
+    conditions:
+      operator: AND
+      items:
+        - indicator: RSI
+          period: 14
+          operator: less_than
+          value: 30
+        - indicator: volume_spike
+          vs_period: 20
+          operator: greater_than
+          multiplier: 1.5
+    fundamentals:
+      max_pe: 40
+      min_market_cap_B: 2.0
+
+  - name: golden_cross
+    type: buy
+    conditions:
+      operator: AND
+      items:
+        - indicator: SMA
+          period: 50
+          operator: crossed_above
+          compare_to_indicator: SMA
+          compare_period: 200
+        - indicator: RSI
+          period: 14
+          operator: less_than
+          value: 65
+    fundamentals:
+      max_pe: 50
+      min_market_cap_B: 1.0
+
+  - name: macd_bullish_crossover
+    type: buy
+    conditions:
+      operator: AND
+      items:
+        - indicator: MACD
+          operator: crossed_above_signal
+          fast: 12
+          slow: 26
+          signal: 9
+        - indicator: price_change_pct
+          period: 5
+          operator: greater_than
+          value: -5.0
+    fundamentals:
+      min_market_cap_B: 1.0
+
+  - name: rsi_overbought_exit
+    type: sell
+    conditions:
+      operator: AND
+      items:
+        - indicator: RSI
+          period: 14
+          operator: greater_than
+          value: 75
+        - indicator: volume_spike
+          vs_period: 20
+          operator: greater_than
+          multiplier: 1.2
+
+  - name: death_cross
+    type: sell
+    conditions:
+      operator: AND
+      items:
+        - indicator: SMA
+          period: 50
+          operator: crossed_below
+          compare_to_indicator: SMA
+          compare_period: 200
+        - indicator: price_change_pct
+          period: 10
+          operator: less_than
+          value: -3.0
