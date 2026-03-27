@@ -15,6 +15,7 @@ requests==2.32.3
 # Config & utilities
 PyYAML==6.0.2
 python-dotenv==1.0.1
+schedule==1.2.2
 
 # Alpha Vantage supplemental data
 alpha-vantage==3.0.0
