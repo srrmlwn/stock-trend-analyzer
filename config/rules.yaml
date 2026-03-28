@@ -18,7 +18,7 @@ rules:
           operator: greater_than
           multiplier: 1.5
     fundamentals:
-      max_pe: 40
+      max_pe: 80
       min_market_cap_B: 2.0
 
   - name: golden_cross
@@ -36,7 +36,7 @@ rules:
           operator: less_than
           value: 65
     fundamentals:
-      max_pe: 50
+      max_pe: 100
       min_market_cap_B: 1.0
 
   - name: macd_bullish_crossover
