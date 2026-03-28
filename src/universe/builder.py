@@ -24,7 +24,10 @@ def get_sp500_tickers() -> list[str]:
         Returns an empty list if the scrape fails.
     """
     try:
-        tables = pd.read_html(_SP500_WIKIPEDIA_URL)
+        tables = pd.read_html(
+            _SP500_WIKIPEDIA_URL,
+            storage_options={"User-Agent": "Mozilla/5.0 (compatible; stock-trend-analyzer/1.0)"},
+        )
         df = tables[0]
         symbols: list[str] = df["Symbol"].tolist()
         cleaned: list[str] = []
