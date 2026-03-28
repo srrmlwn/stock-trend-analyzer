@@ -74,24 +74,25 @@ def _batch_download(
 
     result: dict[str, pd.DataFrame] = {}
 
-    # Single ticker: yf.download returns a flat column index
-    if len(tickers) == 1:
+    if isinstance(raw.columns, pd.MultiIndex):
+        # yf.download returns MultiIndex (metric, ticker) — extract per-ticker slices
+        for ticker in tickers:
+            try:
+                ticker_df = raw.xs(ticker, axis=1, level=1)
+                cols = [c for c in ohlcv_cols if c in ticker_df.columns]
+                df = ticker_df[cols].dropna(how="all").copy()
+                if not df.empty:
+                    result[ticker] = df
+            except KeyError:
+                logger.debug("No data for ticker %s in batch download.", ticker)
+    else:
+        # Flat column index (single ticker, older yfinance behaviour)
         ticker = tickers[0]
         cols = [c for c in ohlcv_cols if c in raw.columns]
         if cols:
-            result[ticker] = raw[cols].copy()
-        return result
-
-    # Multiple tickers: yf.download returns a MultiIndex (metric, ticker)
-    for ticker in tickers:
-        try:
-            ticker_df = raw.xs(ticker, axis=1, level=1)
-            cols = [c for c in ohlcv_cols if c in ticker_df.columns]
-            df = ticker_df[cols].dropna(how="all").copy()
+            df = raw[cols].dropna(how="all").copy()
             if not df.empty:
                 result[ticker] = df
-        except KeyError:
-            logger.debug("No data for ticker %s in batch download.", ticker)
 
     return result
 
@@ -125,12 +126,19 @@ def fetch_ohlcv(
     result: dict[str, pd.DataFrame] = {}
     to_fetch: list[str] = []
 
+    ohlcv_cols = ["Open", "High", "Low", "Close", "Volume"]
+
     for ticker in tickers:
         pkl_file = cache_path / f"{ticker}.pkl"
         if _is_cache_fresh(pkl_file):
             logger.debug("Cache hit for %s — loading from %s.", ticker, pkl_file)
             with pkl_file.open("rb") as fh:
-                result[ticker] = pickle.load(fh)  # noqa: S301
+                df = pickle.load(fh)  # noqa: S301
+            # Flatten MultiIndex columns in case cache was written by an older code path
+            if isinstance(df.columns, pd.MultiIndex):
+                df = df.xs(ticker, axis=1, level=1) if ticker in df.columns.get_level_values(1) else df
+                df.columns = [str(c) for c in df.columns]
+            result[ticker] = df[[c for c in ohlcv_cols if c in df.columns]]
         else:
             to_fetch.append(ticker)
 
