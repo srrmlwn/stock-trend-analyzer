@@ -54,6 +54,7 @@ def _batch_download(
                 interval=interval,
                 auto_adjust=True,
                 progress=False,
+                threads=False,
             )
             break
         except Exception as exc:

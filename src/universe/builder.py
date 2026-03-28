@@ -156,6 +156,7 @@ def _ohlcv_prefilter(
                 interval="1d",
                 auto_adjust=True,
                 progress=False,
+                threads=False,
             )
         except Exception as exc:
             logger.warning("OHLCV chunk %d failed: %s — skipping.", i, exc)
