@@ -8,16 +8,12 @@ from pathlib import Path
 
 import pandas as pd
 import requests  # type: ignore[import-untyped]
-import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
 _SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 _NASDAQ_FTP_URL = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqlisted.txt"
 _OTHER_FTP_URL = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/otherlisted.txt"
-
-# Tickers are downloaded in chunks to avoid oversized requests to Yahoo Finance
-_OHLCV_CHUNK_SIZE = 100
 
 
 def get_sp500_tickers() -> list[str]:
@@ -116,93 +112,84 @@ def get_nyse_nasdaq_tickers() -> list[str]:
     return combined
 
 
-def _ohlcv_prefilter(
+def _local_ohlcv_prefilter(
     tickers: list[str],
     min_price: float = 10.0,
     min_avg_volume: int = 500_000,
+    cache_dir: str = ".cache/ohlcv",
 ) -> list[str]:
-    """Filter tickers by price and volume using batched OHLCV downloads.
+    """Filter tickers by price and volume using the local OHLCV store.
 
-    Downloads ~3 months of daily data in chunks of _OHLCV_CHUNK_SIZE tickers
-    per API call. Uses last closing price and 60-day average volume.
-    Much faster than per-ticker fundamentals calls for initial screening.
+    Reads existing pkl files. Tickers with no pkl file are kept (not excluded)
+    so they can still be bootstrapped. Uses last closing price and 60-day avg volume.
+    Makes zero API calls.
 
     Args:
-        tickers: Full list of candidate tickers.
-        min_price: Minimum last closing price in USD.
+        tickers: Candidate ticker list.
+        min_price: Minimum last closing price.
         min_avg_volume: Minimum 60-day average daily volume.
+        cache_dir: Directory containing per-ticker pkl files.
 
     Returns:
-        Filtered list of tickers passing price and volume thresholds.
+        Filtered ticker list. Tickers without local data are passed through.
     """
-    passed: list[str] = []
-    total = len(tickers)
-    chunks = [tickers[i : i + _OHLCV_CHUNK_SIZE] for i in range(0, total, _OHLCV_CHUNK_SIZE)]
-
-    n_chunks = len(chunks)
-    logger.info(
-        "OHLCV pre-filter: %d tickers in %d chunks of up to %d.",
-        total,
-        n_chunks,
-        _OHLCV_CHUNK_SIZE,
-    )
     t0 = time.time()
+    total = len(tickers)
+    logger.info("Local OHLCV pre-filter: checking %d tickers against local store", total)
 
-    for i, chunk in enumerate(chunks, start=1):
+    store = Path(cache_dir)
+    passed: list[str] = []
+    failed = 0
+    no_data = 0
+
+    for ticker in tickers:
+        pkl_path = store / f"{ticker}.pkl"
+        if not pkl_path.exists():
+            # No local data yet — pass through so it can be bootstrapped later
+            no_data += 1
+            passed.append(ticker)
+            continue
+
         try:
-            raw = yf.download(
-                chunk,
-                period="3mo",
-                interval="1d",
-                auto_adjust=True,
-                progress=False,
-                threads=False,
-            )
+            df: pd.DataFrame = pd.read_pickle(str(pkl_path))
+            if df.empty:
+                # Empty file — pass through
+                no_data += 1
+                passed.append(ticker)
+                continue
+
+            # Normalise column names to title-case for consistent access
+            df.columns = [str(c).title() for c in df.columns]
+
+            last_close = float(df["Close"].iloc[-1])
+            # Use up to last 60 rows for average volume
+            avg_vol = float(df["Volume"].iloc[-60:].mean())
+
+            if last_close >= min_price and avg_vol >= min_avg_volume:
+                passed.append(ticker)
+            else:
+                failed += 1
+                logger.debug(
+                    "Excluding %s: close=%.2f (min %.2f), avg_vol=%.0f (min %d)",
+                    ticker,
+                    last_close,
+                    min_price,
+                    avg_vol,
+                    min_avg_volume,
+                )
         except Exception as exc:
-            logger.warning("OHLCV chunk %d failed: %s — skipping.", i, exc)
-            continue
+            # Corrupt or unreadable file — pass through conservatively
+            logger.warning("Could not read local OHLCV for %s: %s — passing through.", ticker, exc)
+            no_data += 1
+            passed.append(ticker)
 
-        if raw is None or raw.empty:
-            continue
-
-        if isinstance(raw.columns, pd.MultiIndex):
-            # Multiple tickers: columns are (metric, ticker)
-            for ticker in chunk:
-                try:
-                    ticker_df = raw.xs(ticker, axis=1, level=1).dropna(how="all")
-                    if ticker_df.empty:
-                        continue
-                    last_close = float(ticker_df["Close"].iloc[-1])
-                    avg_vol = float(ticker_df["Volume"].mean())
-                    if last_close >= min_price and avg_vol >= min_avg_volume:
-                        passed.append(ticker)
-                except (KeyError, IndexError):
-                    continue
-        else:
-            # Single ticker in chunk
-            ticker = chunk[0]
-            try:
-                last_close = float(raw["Close"].iloc[-1])
-                avg_vol = float(raw["Volume"].mean())
-                if last_close >= min_price and avg_vol >= min_avg_volume:
-                    passed.append(ticker)
-            except (KeyError, IndexError):
-                pass
-
-        elapsed = time.time() - t0
-        rate = i / elapsed if elapsed > 0 else 0
-        eta_s = (n_chunks - i) / rate if rate > 0 else 0
-        logger.info(
-            "OHLCV pre-filter: chunk %d / %d  |  passed=%d  |  elapsed=%.0fs  |  ETA=%.0fs",
-            i, n_chunks, len(passed), elapsed, eta_s,
-        )
-
+    elapsed = time.time() - t0
     logger.info(
-        "OHLCV pre-filter complete: %d / %d tickers passed (price>=%.2f, volume>=%d).",
-        len(passed),
-        total,
-        min_price,
-        min_avg_volume,
+        "Local OHLCV pre-filter: %d passed, %d failed, %d passed through (no local data) — %.1fs",
+        len(passed) - no_data,
+        failed,
+        no_data,
+        elapsed,
     )
     return passed
 
@@ -214,22 +201,21 @@ def apply_prefilter(
     min_avg_volume: int = 500_000,
     min_price: float = 10.0,
 ) -> list[str]:
-    """Apply pre-filter criteria to a list of tickers.
+    """Apply market cap filter to a list of tickers.
 
-    Filters out tickers that do not meet minimum market cap, average volume,
-    and price thresholds. Tickers with missing/None values are excluded
-    conservatively.
+    Filters out tickers that do not meet the minimum market cap threshold.
+    Tickers with missing/None market_cap values are excluded conservatively.
+    Price and volume filtering is handled upstream by _local_ohlcv_prefilter.
 
     Args:
         tickers: List of ticker symbols to filter.
-        fundamentals: Mapping of ticker -> dict with keys ``market_cap``,
-            ``avg_volume``, and ``price``.
+        fundamentals: Mapping of ticker -> dict with key ``market_cap``.
         min_market_cap_B: Minimum market capitalisation in billions of USD.
-        min_avg_volume: Minimum average daily trading volume.
-        min_price: Minimum share price in USD.
+        min_avg_volume: Unused; kept for interface compatibility.
+        min_price: Unused; kept for interface compatibility.
 
     Returns:
-        Filtered list of tickers passing all criteria.
+        Filtered list of tickers passing the market cap criterion.
     """
     passed: list[str] = []
     min_market_cap = min_market_cap_B * 1e9
@@ -269,9 +255,8 @@ def get_universe(
     rebuilds by:
 
     1. Fetching S&P 500 tickers (and NYSE/NASDAQ if ``include_nyse_nasdaq``).
-    2. Running a fast OHLCV pre-filter (batched, price + volume) to trim the
-       pool before making per-ticker fundamentals calls.
-    3. Fetching fundamentals only for OHLCV survivors.
+    2. Running a local OHLCV pre-filter (price + volume from pkl files, 0 API calls).
+    3. Fetching fundamentals only for survivors.
     4. Applying the market-cap filter.
 
     Args:
@@ -330,12 +315,19 @@ def get_universe(
 
     t_start = time.time()
 
-    # Stage 1: fast OHLCV pre-filter (price + volume) — batched, no per-ticker calls
-    logger.info("Stage 1/3: OHLCV pre-filter (price + volume) for %d tickers.", len(all_tickers))
-    ohlcv_passed = _ohlcv_prefilter(all_tickers, min_price=min_price, min_avg_volume=min_avg_volume)
-    logger.info("Stage 1/3 complete in %.0fs — %d tickers remain.", time.time() - t_start, len(ohlcv_passed))
+    # Stage 1: local OHLCV pre-filter (price + volume from pkl files) — 0 API calls
+    logger.info(
+        "Stage 1/3: local OHLCV pre-filter (price + volume, 0 API calls) for %d tickers.",
+        len(all_tickers),
+    )
+    ohlcv_passed = _local_ohlcv_prefilter(
+        all_tickers, min_price=min_price, min_avg_volume=min_avg_volume
+    )
+    logger.info(
+        "Stage 1/3 complete in %.0fs — %d tickers remain.", time.time() - t_start, len(ohlcv_passed)
+    )
 
-    # Stage 2: fetch fundamentals only for OHLCV survivors (market cap check)
+    # Stage 2: fetch fundamentals for survivors — quarterly TTL
     t2 = time.time()
     logger.info("Stage 2/3: fetching fundamentals for %d tickers.", len(ohlcv_passed))
     fundamentals = fetch_fundamentals(ohlcv_passed)
@@ -344,7 +336,11 @@ def get_universe(
     # Stage 3: market cap filter
     logger.info("Stage 3/3: applying market cap filter (>= %.1fB).", min_market_cap_B)
     filtered = apply_prefilter(ohlcv_passed, fundamentals, min_market_cap_B=min_market_cap_B)
-    logger.info("Universe rebuild complete in %.0fs total — %d tickers.", time.time() - t_start, len(filtered))
+    logger.info(
+        "Universe rebuild complete in %.0fs total — %d tickers.",
+        time.time() - t_start,
+        len(filtered),
+    )
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     with cache.open("w") as fh:
@@ -374,6 +370,7 @@ def _load_universe_settings() -> dict[str, float]:
 __all__ = [
     "get_sp500_tickers",
     "get_nyse_nasdaq_tickers",
+    "_local_ohlcv_prefilter",
     "apply_prefilter",
     "get_universe",
 ]
