@@ -186,18 +186,24 @@ def get_universe(
     force_refresh: bool = False,
     cache_path: str = ".cache/universe.json",
     cache_ttl_hours: int = 168,
+    include_nyse_nasdaq: bool = False,
 ) -> list[str]:
     """Return the filtered stock universe, using a weekly cache.
 
     Loads from cache if the file exists and is younger than ``cache_ttl_hours``
     (default 168 h = 7 days) and ``force_refresh`` is False. Otherwise,
-    re-fetches tickers from S&P 500 and NYSE/NASDAQ sources, fetches
+    re-fetches tickers from S&P 500 (and optionally NYSE/NASDAQ), fetches
     fundamentals, applies the pre-filter, and writes the result to cache.
+
+    The default universe is S&P 500 only (~500 tickers). Enabling
+    ``include_nyse_nasdaq`` expands to ~12,000 tickers but requires much
+    longer build time and is more prone to rate limiting.
 
     Args:
         force_refresh: When True, bypass the cache and always re-fetch.
         cache_path: Path to the JSON cache file.
         cache_ttl_hours: Cache time-to-live in hours.
+        include_nyse_nasdaq: When True, merge NYSE/NASDAQ listings into the pool.
 
     Returns:
         Filtered list of ticker symbols.
@@ -220,15 +226,21 @@ def get_universe(
     logger.info("Rebuilding universe (force_refresh=%s).", force_refresh)
 
     sp500 = get_sp500_tickers()
-    nyse_nasdaq = get_nyse_nasdaq_tickers()
 
-    all_tickers = list(dict.fromkeys(sp500 + nyse_nasdaq))
-    logger.info(
-        "Combined ticker pool: %d unique tickers (%d S&P500, %d NYSE/NASDAQ).",
-        len(all_tickers),
-        len(sp500),
-        len(nyse_nasdaq),
-    )
+    if include_nyse_nasdaq:
+        nyse_nasdaq = get_nyse_nasdaq_tickers()
+        all_tickers = list(dict.fromkeys(sp500 + nyse_nasdaq))
+        logger.info(
+            "Combined ticker pool: %d unique tickers (%d S&P500, %d NYSE/NASDAQ).",
+            len(all_tickers),
+            len(sp500),
+            len(nyse_nasdaq),
+        )
+    else:
+        if not sp500:
+            logger.warning("S&P 500 fetch failed and include_nyse_nasdaq=False — universe will be empty.")
+        all_tickers = sp500
+        logger.info("Ticker pool: %d S&P 500 tickers.", len(all_tickers))
 
     fundamentals = fetch_fundamentals(all_tickers)
 

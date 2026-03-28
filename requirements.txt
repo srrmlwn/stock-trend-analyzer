@@ -8,6 +8,7 @@ pandas-ta>=0.4.67b0
 
 # HTTP / networking
 requests>=2.28.0
+lxml>=5.0.0
 
 # Config & utilities
 PyYAML>=6.0

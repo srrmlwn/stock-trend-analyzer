@@ -15,6 +15,7 @@ logger = logging.getLogger(__name__)
 _CACHE_TTL_SECONDS = 24 * 60 * 60  # 24 hours
 _RETRY_COUNT = 3
 _RETRY_BASE_DELAY = 2.0  # seconds; doubled each retry: 2, 4, 8
+_FUNDAMENTALS_REQUEST_DELAY = 0.2  # seconds between per-ticker fundamentals calls
 
 
 def _is_cache_fresh(path: Path) -> bool:
@@ -228,6 +229,7 @@ def fetch_fundamentals(
             continue
 
         logger.debug("Cache miss for fundamentals %s — fetching from yfinance.", ticker)
+        time.sleep(_FUNDAMENTALS_REQUEST_DELAY)
         try:
             info = _fetch_fundamentals_with_retry(ticker)
         except Exception as exc:
