@@ -4,6 +4,7 @@ universe:
   min_avg_volume: 500000       # Minimum average daily volume
   min_price: 10.0              # Minimum share price
   cache_ttl_hours: 168         # Refresh universe weekly (7 days)
+  include_nyse_nasdaq: false   # Set to true to expand beyond S&P 500 (~15-20 min rebuild)
 
 # Data fetch settings
 data:

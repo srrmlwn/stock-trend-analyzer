@@ -180,8 +180,10 @@ def run_scan(
     logger.info("Starting daily scan — %s", scan_date)
     t0 = time.time()
 
-    cache_ttl_hours: int = settings.get("universe", {}).get("cache_ttl_hours", 168)
-    universe = get_universe(cache_ttl_hours=cache_ttl_hours)
+    universe_cfg: dict[str, Any] = settings.get("universe", {})
+    cache_ttl_hours: int = universe_cfg.get("cache_ttl_hours", 168)
+    include_nyse_nasdaq: bool = bool(universe_cfg.get("include_nyse_nasdaq", False))
+    universe = get_universe(cache_ttl_hours=cache_ttl_hours, include_nyse_nasdaq=include_nyse_nasdaq)
     logger.info("Universe: %d tickers", len(universe))
 
     period_years: int = settings.get("data", {}).get("period_years", 10)

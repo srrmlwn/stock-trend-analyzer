@@ -8,12 +8,16 @@ from pathlib import Path
 
 import pandas as pd
 import requests  # type: ignore[import-untyped]
+import yfinance as yf
 
 logger = logging.getLogger(__name__)
 
 _SP500_WIKIPEDIA_URL = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies"
 _NASDAQ_FTP_URL = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/nasdaqlisted.txt"
 _OTHER_FTP_URL = "ftp://ftp.nasdaqtrader.com/SymbolDirectory/otherlisted.txt"
+
+# Tickers are downloaded in chunks to avoid oversized requests to Yahoo Finance
+_OHLCV_CHUNK_SIZE = 100
 
 
 def get_sp500_tickers() -> list[str]:
@@ -112,6 +116,88 @@ def get_nyse_nasdaq_tickers() -> list[str]:
     return combined
 
 
+def _ohlcv_prefilter(
+    tickers: list[str],
+    min_price: float = 10.0,
+    min_avg_volume: int = 500_000,
+) -> list[str]:
+    """Filter tickers by price and volume using batched OHLCV downloads.
+
+    Downloads ~3 months of daily data in chunks of _OHLCV_CHUNK_SIZE tickers
+    per API call. Uses last closing price and 60-day average volume.
+    Much faster than per-ticker fundamentals calls for initial screening.
+
+    Args:
+        tickers: Full list of candidate tickers.
+        min_price: Minimum last closing price in USD.
+        min_avg_volume: Minimum 60-day average daily volume.
+
+    Returns:
+        Filtered list of tickers passing price and volume thresholds.
+    """
+    passed: list[str] = []
+    total = len(tickers)
+    chunks = [tickers[i : i + _OHLCV_CHUNK_SIZE] for i in range(0, total, _OHLCV_CHUNK_SIZE)]
+
+    logger.info(
+        "OHLCV pre-filter: %d tickers in %d chunks of %d.",
+        total,
+        len(chunks),
+        _OHLCV_CHUNK_SIZE,
+    )
+
+    for i, chunk in enumerate(chunks, start=1):
+        if i % 10 == 0 or i == len(chunks):
+            logger.info("OHLCV pre-filter: chunk %d / %d", i, len(chunks))
+        try:
+            raw = yf.download(
+                chunk,
+                period="3mo",
+                interval="1d",
+                auto_adjust=True,
+                progress=False,
+            )
+        except Exception as exc:
+            logger.warning("OHLCV chunk %d failed: %s — skipping.", i, exc)
+            continue
+
+        if raw is None or raw.empty:
+            continue
+
+        if isinstance(raw.columns, pd.MultiIndex):
+            # Multiple tickers: columns are (metric, ticker)
+            for ticker in chunk:
+                try:
+                    ticker_df = raw.xs(ticker, axis=1, level=1).dropna(how="all")
+                    if ticker_df.empty:
+                        continue
+                    last_close = float(ticker_df["Close"].iloc[-1])
+                    avg_vol = float(ticker_df["Volume"].mean())
+                    if last_close >= min_price and avg_vol >= min_avg_volume:
+                        passed.append(ticker)
+                except (KeyError, IndexError):
+                    continue
+        else:
+            # Single ticker in chunk
+            ticker = chunk[0]
+            try:
+                last_close = float(raw["Close"].iloc[-1])
+                avg_vol = float(raw["Volume"].mean())
+                if last_close >= min_price and avg_vol >= min_avg_volume:
+                    passed.append(ticker)
+            except (KeyError, IndexError):
+                pass
+
+    logger.info(
+        "OHLCV pre-filter: %d / %d tickers passed (price>=%.2f, volume>=%d).",
+        len(passed),
+        total,
+        min_price,
+        min_avg_volume,
+    )
+    return passed
+
+
 def apply_prefilter(
     tickers: list[str],
     fundamentals: dict[str, dict],  # type: ignore[type-arg]
@@ -146,41 +232,17 @@ def apply_prefilter(
             continue
 
         market_cap = info.get("market_cap")
-        avg_volume = info.get("avg_volume")
-        price = info.get("price")
-
-        if market_cap is None or avg_volume is None or price is None:
-            logger.debug("Excluding %s: missing fundamental field(s).", ticker)
-            continue
-
-        if market_cap < min_market_cap:
-            logger.debug(
-                "Excluding %s: market_cap %.2fB < %.2fB.",
-                ticker,
-                market_cap / 1e9,
-                min_market_cap_B,
-            )
-            continue
-
-        if avg_volume < min_avg_volume:
-            logger.debug(
-                "Excluding %s: avg_volume %d < %d.", ticker, avg_volume, min_avg_volume
-            )
-            continue
-
-        if price < min_price:
-            logger.debug("Excluding %s: price %.2f < %.2f.", ticker, price, min_price)
+        if market_cap is None or market_cap < min_market_cap:
+            logger.debug("Excluding %s: market_cap below threshold.", ticker)
             continue
 
         passed.append(ticker)
 
     logger.info(
-        "Pre-filter: %d/%d tickers passed (market_cap>=%.1fB, volume>=%d, price>=%.2f).",
+        "Market cap filter: %d / %d tickers passed (market_cap >= %.1fB).",
         len(passed),
         len(tickers),
         min_market_cap_B,
-        min_avg_volume,
-        min_price,
     )
     return passed
 
@@ -194,19 +256,21 @@ def get_universe(
     """Return the filtered stock universe, using a weekly cache.
 
     Loads from cache if the file exists and is younger than ``cache_ttl_hours``
-    (default 168 h = 7 days) and ``force_refresh`` is False. Otherwise,
-    re-fetches tickers from S&P 500 (and optionally NYSE/NASDAQ), fetches
-    fundamentals, applies the pre-filter, and writes the result to cache.
+    (default 168 h = 7 days) and ``force_refresh`` is False. Otherwise
+    rebuilds by:
 
-    The default universe is S&P 500 only (~500 tickers). Enabling
-    ``include_nyse_nasdaq`` expands to ~12,000 tickers but requires much
-    longer build time and is more prone to rate limiting.
+    1. Fetching S&P 500 tickers (and NYSE/NASDAQ if ``include_nyse_nasdaq``).
+    2. Running a fast OHLCV pre-filter (batched, price + volume) to trim the
+       pool before making per-ticker fundamentals calls.
+    3. Fetching fundamentals only for OHLCV survivors.
+    4. Applying the market-cap filter.
 
     Args:
         force_refresh: When True, bypass the cache and always re-fetch.
         cache_path: Path to the JSON cache file.
         cache_ttl_hours: Cache time-to-live in hours.
-        include_nyse_nasdaq: When True, merge NYSE/NASDAQ listings into the pool.
+        include_nyse_nasdaq: When True, merge NYSE/NASDAQ listings (~12k tickers)
+            into the pool. Rebuild takes ~15–20 min but runs only once a week.
 
     Returns:
         Filtered list of ticker symbols.
@@ -234,20 +298,36 @@ def get_universe(
         nyse_nasdaq = get_nyse_nasdaq_tickers()
         all_tickers = list(dict.fromkeys(sp500 + nyse_nasdaq))
         logger.info(
-            "Combined ticker pool: %d unique tickers (%d S&P500, %d NYSE/NASDAQ).",
+            "Ticker pool: %d unique tickers (%d S&P 500, %d NYSE/NASDAQ).",
             len(all_tickers),
             len(sp500),
             len(nyse_nasdaq),
         )
     else:
         if not sp500:
-            logger.warning("S&P 500 fetch failed and include_nyse_nasdaq=False — universe will be empty.")
+            logger.warning(
+                "S&P 500 fetch failed and include_nyse_nasdaq=False — universe will be empty."
+            )
         all_tickers = sp500
         logger.info("Ticker pool: %d S&P 500 tickers.", len(all_tickers))
 
-    fundamentals = fetch_fundamentals(all_tickers)
+    if not all_tickers:
+        return []
 
-    filtered = apply_prefilter(all_tickers, fundamentals)
+    # Step 1: fast OHLCV pre-filter (price + volume) — single batch download per chunk
+    settings = _load_universe_settings()
+    min_price: float = settings.get("min_price", 10.0)
+    min_avg_volume: int = int(settings.get("min_avg_volume", 500_000))
+    min_market_cap_B: float = settings.get("min_market_cap_B", 1.0)
+
+    ohlcv_passed = _ohlcv_prefilter(all_tickers, min_price=min_price, min_avg_volume=min_avg_volume)
+
+    # Step 2: fetch fundamentals only for OHLCV survivors (market cap check)
+    logger.info("Fetching fundamentals for %d OHLCV-filtered tickers.", len(ohlcv_passed))
+    fundamentals = fetch_fundamentals(ohlcv_passed)
+
+    # Step 3: market cap filter
+    filtered = apply_prefilter(ohlcv_passed, fundamentals, min_market_cap_B=min_market_cap_B)
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     with cache.open("w") as fh:
@@ -255,6 +335,23 @@ def get_universe(
     logger.info("Universe cached to %s (%d tickers).", cache_path, len(filtered))
 
     return filtered
+
+
+def _load_universe_settings() -> dict[str, float]:
+    """Load universe filter thresholds from config/settings.yaml if available.
+
+    Returns:
+        Dict with keys min_price, min_avg_volume, min_market_cap_B.
+        Falls back to defaults if file is missing or unparseable.
+    """
+    try:
+        import yaml  # type: ignore[import-untyped]
+
+        with open("config/settings.yaml") as fh:
+            cfg = yaml.safe_load(fh) or {}
+        return cfg.get("universe", {})
+    except Exception:
+        return {}
 
 
 __all__ = [
