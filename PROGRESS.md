@@ -35,7 +35,7 @@ redundant downloads, rate limiting, and unnecessary API calls.
 
 | # | Task | Owner | Status |
 |---|------|-------|--------|
-| 1 | `--bootstrap` CLI command + `src/data/bootstrap.py` | agent/task-1-bootstrap | 🔄 In Progress |
+| 1 | `--bootstrap` CLI command + `src/data/bootstrap.py` | agent/task-1-bootstrap | ✅ Complete |
 | 2 | Tiingo incremental fetch + quarterly fundamentals TTL | agent/task-2-tiingo | 🔄 In Progress |
 | 3 | Universe filter from local store (zero OHLCV API calls) | agent/task-3-universe | 🔄 In Progress |
 

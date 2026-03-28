@@ -7,6 +7,7 @@ Usage:
     python -m src.scheduler.main --backtest --tickers AAPL MSFT \
         --start-date 2018-01-01 --end-date 2023-12-31
     python -m src.scheduler.main --schedule
+    python -m src.scheduler.main --bootstrap
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ import yaml  # type: ignore[import-untyped]
 
 from src.backtest.engine import run_backtest
 from src.backtest.report import print_backtest_report
+from src.data.bootstrap import run_bootstrap
 from src.report.sender import send_daily_report
 from src.rules.parser import load_rules
 from src.scanner.scanner import run_scan, run_scan_on_tickers
@@ -156,10 +158,11 @@ def _run_schedule() -> None:
 def main() -> None:
     """Parse CLI arguments and dispatch to the appropriate action.
 
-    Supports three mutually exclusive modes:
+    Supports four mutually exclusive modes:
     - ``--run-now``: Run the full scan pipeline immediately.
     - ``--backtest``: Run the backtester on specified tickers.
     - ``--schedule``: Start the blocking daily scheduler.
+    - ``--bootstrap``: Seed the local OHLCV cache from Kaggle + SimFin datasets.
     """
     global _config_path, _settings_path  # noqa: PLW0603
 
@@ -184,6 +187,11 @@ def main() -> None:
         action="store_true",
         help="Start the daily scheduler (blocks)",
     )
+    mode_group.add_argument(
+        "--bootstrap",
+        action="store_true",
+        help="Seed the local OHLCV cache from Kaggle + SimFin bulk datasets (one-time setup)",
+    )
 
     parser.add_argument(
         "--dry-run",
@@ -195,7 +203,7 @@ def main() -> None:
         "--tickers",
         nargs="+",
         metavar="TICKER",
-        help="One or more ticker symbols (required with --backtest; optional with --run-now to skip universe builder)",
+        help="Ticker symbols (required with --backtest; optional with --run-now)",
     )
     parser.add_argument(
         "--start-date",
@@ -253,6 +261,9 @@ def main() -> None:
 
     elif args.schedule:
         _run_schedule()
+
+    elif args.bootstrap:
+        run_bootstrap()
 
 
 if __name__ == "__main__":

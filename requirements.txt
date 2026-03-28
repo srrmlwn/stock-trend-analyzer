@@ -1,5 +1,6 @@
 # Data fetching
 yfinance>=0.2.55
+tiingo>=0.14.0
 pandas>=2.0.0
 numpy>=1.26.0
 
@@ -13,6 +14,10 @@ lxml>=5.0.0
 # Config & utilities
 PyYAML>=6.0
 schedule>=1.2.0
+
+# Bootstrap dependencies (optional — only needed for --bootstrap command)
+kaggle>=1.6.0
+simfin>=0.9.0
 
 # Dev tooling
 black>=24.0.0
