@@ -25,40 +25,75 @@ def _is_cache_fresh(path: Path) -> bool:
     return age < _CACHE_TTL_SECONDS
 
 
-def _fetch_with_retry(ticker: str, period_years: int, interval: str) -> pd.DataFrame:
-    """Fetch OHLCV data from yfinance with up to 3 retries on network errors.
+def _batch_download(
+    tickers: list[str], period_years: int, interval: str
+) -> dict[str, pd.DataFrame]:
+    """Download OHLCV for multiple tickers in a single yf.download() call.
+
+    Batching avoids per-ticker HTTP requests and reduces Yahoo Finance rate
+    limiting compared to calling yf.Ticker().history() in a loop.
 
     Args:
-        ticker: Ticker symbol (e.g. "AAPL").
-        period_years: Number of years of history to fetch.
+        tickers: List of ticker symbols to download.
+        period_years: Years of history to fetch.
         interval: Bar interval string accepted by yfinance (e.g. "1d").
 
     Returns:
-        DataFrame with columns Open, High, Low, Close, Volume.
-
-    Raises:
-        Exception: Re-raises the last exception if all retries are exhausted.
+        Mapping of ticker -> OHLCV DataFrame. Tickers with no data are omitted.
     """
     period_str = f"{period_years}y"
+    ohlcv_cols = ["Open", "High", "Low", "Close", "Volume"]
+
     last_exc: Exception = RuntimeError("Unknown error")
     for attempt in range(_RETRY_COUNT):
         try:
-            ticker_obj = yf.Ticker(ticker)
-            df: pd.DataFrame = ticker_obj.history(period=period_str, interval=interval)
-            return df
+            raw = yf.download(
+                tickers,
+                period=period_str,
+                interval=interval,
+                auto_adjust=True,
+                progress=False,
+            )
+            break
         except Exception as exc:
             last_exc = exc
             delay = _RETRY_BASE_DELAY * (2**attempt)
             logger.warning(
-                "Attempt %d/%d failed for ticker %s: %s. Retrying in %.0fs.",
+                "Attempt %d/%d failed (batch download): %s. Retrying in %.0fs.",
                 attempt + 1,
                 _RETRY_COUNT,
-                ticker,
                 exc,
                 delay,
             )
             time.sleep(delay)
-    raise last_exc
+    else:
+        raise last_exc
+
+    if raw is None or raw.empty:
+        return {}
+
+    result: dict[str, pd.DataFrame] = {}
+
+    # Single ticker: yf.download returns a flat column index
+    if len(tickers) == 1:
+        ticker = tickers[0]
+        cols = [c for c in ohlcv_cols if c in raw.columns]
+        if cols:
+            result[ticker] = raw[cols].copy()
+        return result
+
+    # Multiple tickers: yf.download returns a MultiIndex (metric, ticker)
+    for ticker in tickers:
+        try:
+            ticker_df = raw.xs(ticker, axis=1, level=1)
+            cols = [c for c in ohlcv_cols if c in ticker_df.columns]
+            df = ticker_df[cols].dropna(how="all").copy()
+            if not df.empty:
+                result[ticker] = df
+        except KeyError:
+            logger.debug("No data for ticker %s in batch download.", ticker)
+
+    return result
 
 
 def fetch_ohlcv(
@@ -68,6 +103,9 @@ def fetch_ohlcv(
     cache_dir: str = ".cache/ohlcv",
 ) -> dict[str, pd.DataFrame]:
     """Fetch daily OHLCV for each ticker. Uses disk cache if < 24 h old.
+
+    Cache-fresh tickers are loaded from disk. The remaining tickers are
+    fetched in a single batched yf.download() call to avoid rate limiting.
 
     Args:
         tickers: List of ticker symbols to fetch.
@@ -85,34 +123,35 @@ def fetch_ohlcv(
     cache_path.mkdir(parents=True, exist_ok=True)
 
     result: dict[str, pd.DataFrame] = {}
+    to_fetch: list[str] = []
 
     for ticker in tickers:
         pkl_file = cache_path / f"{ticker}.pkl"
-
         if _is_cache_fresh(pkl_file):
             logger.debug("Cache hit for %s — loading from %s.", ticker, pkl_file)
             with pkl_file.open("rb") as fh:
                 result[ticker] = pickle.load(fh)  # noqa: S301
-            continue
+        else:
+            to_fetch.append(ticker)
 
-        logger.debug("Cache miss for %s — fetching from yfinance.", ticker)
-        try:
-            df = _fetch_with_retry(ticker, period_years, interval)
-        except Exception as exc:
-            logger.warning("Skipping ticker %s after retries exhausted: %s", ticker, exc)
-            continue
+    if not to_fetch:
+        return result
 
+    logger.info("Fetching %d ticker(s) from yfinance (batched).", len(to_fetch))
+    try:
+        fetched = _batch_download(to_fetch, period_years, interval)
+    except Exception as exc:
+        logger.warning("Batch download failed after retries: %s", exc)
+        return result
+
+    for ticker in to_fetch:
+        df = fetched.get(ticker)
         if df is None or df.empty:
             logger.warning("Empty DataFrame returned for ticker %s — skipping.", ticker)
             continue
-
-        # Keep only the standard OHLCV columns when present
-        ohlcv_cols = [c for c in ["Open", "High", "Low", "Close", "Volume"] if c in df.columns]
-        df = df[ohlcv_cols]
-
+        pkl_file = cache_path / f"{ticker}.pkl"
         with pkl_file.open("wb") as fh:
             pickle.dump(df, fh)
-
         result[ticker] = df
 
     return result
