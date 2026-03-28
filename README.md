@@ -12,9 +12,8 @@ No paid data services required.
 
 ## Requirements
 
-- Python 3.11+
-- Gmail account with App Password enabled (for email reports)
-- Alpha Vantage free API key (optional, for supplemental fundamental data)
+- Python 3.12+
+- Gmail account with App Password enabled (optional, for email reports only)
 
 ## Installation
 
@@ -30,11 +29,13 @@ pip install -r requirements.txt
 
 ## Configuration
 
-1. Copy `.env.example` to `.env` and fill in your credentials:
+1. Copy `.env.example` to `.env`:
 
 ```bash
 cp .env.example .env
 ```
+
+Email credentials are only needed if you want to send reports via Gmail. The scanner works fully without them using `--dry-run`.
 
 2. Edit `config/rules.yaml` to define your buy/sell rules.
 
@@ -43,17 +44,25 @@ cp .env.example .env
 ## Running the Scanner
 
 ```bash
-# Dry run (prints signals to stdout, no email)
-python -m src.scheduler.main --run-now --dry-run
+# Scan a single stock (prints signals to stdout)
+python -m src.scheduler.main --run-now --dry-run --tickers AAPL
 
-# Full run (fetches data, evaluates rules, sends email)
-python -m src.scheduler.main --run-now
+# Scan multiple specific stocks
+python -m src.scheduler.main --run-now --dry-run --tickers AAPL MSFT NVDA TSLA
+
+# Scan the full configured universe
+python -m src.scheduler.main --run-now --dry-run
 
 # Run backtester on specific tickers
 python -m src.scheduler.main --backtest --tickers AAPL MSFT NVDA
 
-# Start scheduled mode (runs daily at 10am ET on weekdays)
+# Start scheduled mode (runs daily at 10am ET on weekdays, sends email)
 python -m src.scheduler.main --schedule
+```
+
+Output format:
+```
+AAPL   | BUY  | golden_cross                   | 50-day MA crossed above 200-day MA
 ```
 
 ## Running Tests
@@ -106,8 +115,7 @@ stock-trend-analyzer/
 |---|---|
 | `yfinance` | OHLCV price history, basic fundamentals |
 | `pandas-ta` | Technical indicator calculations |
-| `vectorbt` | Backtesting simulation |
-| `alpha_vantage` | Supplemental fundamental data (free tier) |
+| `pandas-ta` | Technical indicator calculations (optional, has fallback) |
 
 ## License
 
