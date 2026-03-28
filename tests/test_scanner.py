@@ -25,7 +25,7 @@ def _make_sample_df() -> pd.DataFrame:
 
     np.random.seed(0)
     n = 60
-    dates = pd.date_range(end=date.today(), periods=n, freq="B")
+    dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
     close = 100.0 + np.cumsum(np.random.randn(n) * 1.5)
     df = pd.DataFrame(
         {
@@ -79,7 +79,7 @@ SAMPLE_FUNDAMENTALS = {
 SAMPLE_RULES = [_make_sample_rule()]
 SAMPLE_SIGNALS = [_make_sample_signal()]
 SAMPLE_SETTINGS = {
-    "universe": {"cache_ttl_hours": 168},
+    "universe": {"cache_ttl_hours": 168, "include_nyse_nasdaq": False},
     "data": {"period_years": 10},
 }
 
@@ -113,7 +113,7 @@ def test_run_scan_returns_signals(
 
     assert signals == SAMPLE_SIGNALS
     mock_rules.assert_called_once_with("config/rules.yaml")
-    mock_universe.assert_called_once_with(cache_ttl_hours=168)
+    mock_universe.assert_called_once_with(cache_ttl_hours=168, include_nyse_nasdaq=False)
     mock_ohlcv.assert_called_once_with(SAMPLE_TICKERS, period_years=10)
     mock_fundamentals.assert_called_once_with(SAMPLE_TICKERS)
     mock_eval.assert_called_once()

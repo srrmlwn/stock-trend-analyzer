@@ -23,7 +23,7 @@ from src.rules.models import ConditionBlock, ConditionItem, FundamentalFilter, R
 def _make_ohlcv(n: int = 250, seed: int = 42, trend: float = 0.3) -> pd.DataFrame:
     """Create a synthetic OHLCV DataFrame with n rows of business-day index."""
     rng = np.random.default_rng(seed)
-    dates = pd.date_range(end=date.today(), periods=n, freq="B")
+    dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
     close = 100.0 + np.cumsum(rng.normal(trend, 1.5, n))
     close = np.maximum(close, 1.0)
     high = close * (1 + np.abs(rng.normal(0, 0.01, n)))
@@ -41,7 +41,7 @@ def _make_ohlcv(n: int = 250, seed: int = 42, trend: float = 0.3) -> pd.DataFram
 
 def _make_flat_ohlcv(n: int = 250) -> pd.DataFrame:
     """Create a perfectly flat OHLCV DataFrame — no crossovers can occur."""
-    dates = pd.date_range(end=date.today(), periods=n, freq="B")
+    dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
     close = np.full(n, 100.0)
     df = pd.DataFrame(
         {

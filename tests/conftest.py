@@ -12,7 +12,7 @@ def sample_ohlcv() -> pd.DataFrame:
     """Return a synthetic 60-row daily OHLCV DataFrame for a single ticker."""
     np.random.seed(42)
     n = 60
-    dates = pd.date_range(end=date.today(), periods=n, freq="B")  # business days
+    dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
     close = 100.0 + np.cumsum(np.random.randn(n) * 1.5)
     close = np.maximum(close, 1.0)  # ensure positive
     high = close * (1 + np.abs(np.random.randn(n) * 0.01))

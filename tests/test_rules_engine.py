@@ -23,7 +23,7 @@ from src.rules.models import (
 
 def _make_df(n: int = 10, **extra_cols: list[float]) -> pd.DataFrame:
     """Return a minimal DataFrame with Close/Volume columns plus any extras."""
-    dates = pd.date_range(end=date.today(), periods=n, freq="B")
+    dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
     close = [100.0 + i for i in range(n)]
     df = pd.DataFrame(
         {

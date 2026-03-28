@@ -48,7 +48,7 @@ def _make_ohlcv_df(n: int = 5, end: "date | None" = None) -> pd.DataFrame:
     regardless of whether they run on a weekday or weekend.
     """
     end = _last_business_day(end)
-    dates = pd.date_range(end=str(end), periods=n, freq="B")
+    dates = pd.date_range(end=str(end), periods=n, freq="D")
     rng = np.random.default_rng(0)
     close = 100.0 + rng.standard_normal(n).cumsum()
     return pd.DataFrame(

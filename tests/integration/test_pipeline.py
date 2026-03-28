@@ -56,7 +56,7 @@ def test_full_scan_pipeline_dry_run() -> None:
     tickers = ["AAPL", "MSFT", "NVDA"]
 
     def make_ohlcv(n: int = 252) -> pd.DataFrame:
-        dates = pd.date_range(end=date.today(), periods=n, freq="B")
+        dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
         close = 100.0 + np.cumsum(np.random.randn(n) * 1.5)
         close = np.maximum(close, 10.0)
         high = close * 1.01
@@ -103,7 +103,7 @@ def test_backtest_on_small_universe() -> None:
     np.random.seed(123)
 
     def make_ohlcv(n: int = 504) -> pd.DataFrame:  # ~2 years
-        dates = pd.date_range(start="2020-01-01", periods=n, freq="B")
+        dates = pd.date_range(start="2020-01-01", periods=n, freq="D")
         close = 100.0 + np.cumsum(np.random.randn(n) * 1.5)
         close = np.maximum(close, 10.0)
         high = close * 1.01
@@ -156,7 +156,7 @@ def test_signal_fields_are_complete() -> None:
 
     np.random.seed(7)
     n = 252
-    dates = pd.date_range(end=date.today(), periods=n, freq="B")
+    dates = pd.date_range(start="2024-01-01", periods=n, freq="D")
     # Construct data that guarantees RSI oversold (low, trending down)
     close = np.linspace(100, 60, n) + np.random.randn(n) * 0.5
     close = np.maximum(close, 10.0)
