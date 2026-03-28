@@ -28,6 +28,7 @@ ignore_missing_imports = true
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-v"
+pythonpath = ["."]
 markers = [
     "integration: marks tests as integration tests (may make network calls)",
 ]
