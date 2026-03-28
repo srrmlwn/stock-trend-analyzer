@@ -218,17 +218,20 @@ def fetch_fundamentals(
     cache_path.mkdir(parents=True, exist_ok=True)
 
     result: dict[str, dict[str, object]] = {}
+    total = len(tickers)
+    fetched_count = 0
+    t0 = time.time()
+    _LOG_EVERY = max(1, min(50, total // 20))  # log ~20 times across the run
 
-    for ticker in tickers:
+    for i, ticker in enumerate(tickers, start=1):
         json_file = cache_path / f"{ticker}.json"
 
         if _is_cache_fresh(json_file):
-            logger.debug("Cache hit for fundamentals %s — loading from %s.", ticker, json_file)
+            logger.debug("Cache hit for fundamentals %s.", ticker)
             with json_file.open() as fh:
                 result[ticker] = json.load(fh)
             continue
 
-        logger.debug("Cache miss for fundamentals %s — fetching from yfinance.", ticker)
         time.sleep(_FUNDAMENTALS_REQUEST_DELAY)
         try:
             info = _fetch_fundamentals_with_retry(ticker)
@@ -249,6 +252,17 @@ def fetch_fundamentals(
             json.dump(fundamentals, fh)
 
         result[ticker] = fundamentals
+        fetched_count += 1
+
+        if i % _LOG_EVERY == 0 or i == total:
+            elapsed = time.time() - t0
+            rate = fetched_count / elapsed if elapsed > 0 else 0
+            remaining = total - i
+            eta_s = remaining / rate if rate > 0 else 0
+            logger.info(
+                "Fundamentals: %d / %d  |  fetched=%d  |  elapsed=%.0fs  |  ETA=%.0fs",
+                i, total, fetched_count, elapsed, eta_s,
+            )
 
     return result
 

@@ -139,16 +139,16 @@ def _ohlcv_prefilter(
     total = len(tickers)
     chunks = [tickers[i : i + _OHLCV_CHUNK_SIZE] for i in range(0, total, _OHLCV_CHUNK_SIZE)]
 
+    n_chunks = len(chunks)
     logger.info(
-        "OHLCV pre-filter: %d tickers in %d chunks of %d.",
+        "OHLCV pre-filter: %d tickers in %d chunks of up to %d.",
         total,
-        len(chunks),
+        n_chunks,
         _OHLCV_CHUNK_SIZE,
     )
+    t0 = time.time()
 
     for i, chunk in enumerate(chunks, start=1):
-        if i % 10 == 0 or i == len(chunks):
-            logger.info("OHLCV pre-filter: chunk %d / %d", i, len(chunks))
         try:
             raw = yf.download(
                 chunk,
@@ -188,8 +188,16 @@ def _ohlcv_prefilter(
             except (KeyError, IndexError):
                 pass
 
+        elapsed = time.time() - t0
+        rate = i / elapsed if elapsed > 0 else 0
+        eta_s = (n_chunks - i) / rate if rate > 0 else 0
+        logger.info(
+            "OHLCV pre-filter: chunk %d / %d  |  passed=%d  |  elapsed=%.0fs  |  ETA=%.0fs",
+            i, n_chunks, len(passed), elapsed, eta_s,
+        )
+
     logger.info(
-        "OHLCV pre-filter: %d / %d tickers passed (price>=%.2f, volume>=%d).",
+        "OHLCV pre-filter complete: %d / %d tickers passed (price>=%.2f, volume>=%d).",
         len(passed),
         total,
         min_price,
@@ -314,20 +322,28 @@ def get_universe(
     if not all_tickers:
         return []
 
-    # Step 1: fast OHLCV pre-filter (price + volume) — single batch download per chunk
     settings = _load_universe_settings()
     min_price: float = settings.get("min_price", 10.0)
     min_avg_volume: int = int(settings.get("min_avg_volume", 500_000))
     min_market_cap_B: float = settings.get("min_market_cap_B", 1.0)
 
+    t_start = time.time()
+
+    # Stage 1: fast OHLCV pre-filter (price + volume) — batched, no per-ticker calls
+    logger.info("Stage 1/3: OHLCV pre-filter (price + volume) for %d tickers.", len(all_tickers))
     ohlcv_passed = _ohlcv_prefilter(all_tickers, min_price=min_price, min_avg_volume=min_avg_volume)
+    logger.info("Stage 1/3 complete in %.0fs — %d tickers remain.", time.time() - t_start, len(ohlcv_passed))
 
-    # Step 2: fetch fundamentals only for OHLCV survivors (market cap check)
-    logger.info("Fetching fundamentals for %d OHLCV-filtered tickers.", len(ohlcv_passed))
+    # Stage 2: fetch fundamentals only for OHLCV survivors (market cap check)
+    t2 = time.time()
+    logger.info("Stage 2/3: fetching fundamentals for %d tickers.", len(ohlcv_passed))
     fundamentals = fetch_fundamentals(ohlcv_passed)
+    logger.info("Stage 2/3 complete in %.0fs.", time.time() - t2)
 
-    # Step 3: market cap filter
+    # Stage 3: market cap filter
+    logger.info("Stage 3/3: applying market cap filter (>= %.1fB).", min_market_cap_B)
     filtered = apply_prefilter(ohlcv_passed, fundamentals, min_market_cap_B=min_market_cap_B)
+    logger.info("Universe rebuild complete in %.0fs total — %d tickers.", time.time() - t_start, len(filtered))
 
     cache.parent.mkdir(parents=True, exist_ok=True)
     with cache.open("w") as fh:
