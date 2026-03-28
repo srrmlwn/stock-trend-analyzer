@@ -324,6 +324,14 @@ def add_all_indicators(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame
                 if key not in seen:
                     seen.add(key)
                     add_sma(df, period=period)
+                # Also add the comparison SMA if this is a crossover condition
+                compare_period = req.get("compare_period")
+                if compare_period is not None:
+                    cmp_period = int(compare_period)
+                    cmp_key = ("SMA", str(cmp_period))
+                    if cmp_key not in seen:
+                        seen.add(cmp_key)
+                        add_sma(df, period=cmp_period)
 
             elif indicator == "EMA":
                 period = int(req.get("period", 20))
@@ -332,8 +340,8 @@ def add_all_indicators(df: pd.DataFrame, config: dict[str, Any]) -> pd.DataFrame
                     seen.add(key)
                     add_ema(df, period=period)
 
-            elif indicator == "VOLUME_RATIO":
-                period = int(req.get("period", 20))
+            elif indicator in ("VOLUME_RATIO", "VOLUME_SPIKE"):
+                period = int(req.get("period", req.get("vs_period", 20)))
                 key = ("VOLUME_RATIO", str(period))
                 if key not in seen:
                     seen.add(key)
